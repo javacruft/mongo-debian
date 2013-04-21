@@ -406,7 +406,7 @@ namespace mongo {
                     p += 8;
                     break;
                 case cdouble:
-                    b.append("", (double&) *p);
+                    b.append("", (reinterpret_cast< const PackedDouble& >(*p)).d);
                     p += sizeof(double);
                     break;
                 case cint:

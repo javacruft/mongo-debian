@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include <string.h> // strlen
+#include <string.h> // strlen, memcpy
 #include <string>
 #include <vector>
 
@@ -528,13 +528,27 @@ namespace mongo {
     }
 
     inline double BSONElement::numberDouble() const {
+#if defined(__arm__)
+        int int_result;
+        long long long_long_result;
+#endif
         switch( type() ) {
         case NumberDouble:
             return _numberDouble();
         case NumberInt:
+#if defined(__arm__)
+            memcpy(&int_result, value(), sizeof(int_result));
+            return int_result;
+#else
             return *reinterpret_cast< const int* >( value() );
+#endif
         case NumberLong:
+#if defined(__arm__)
+            memcpy(&long_long_result, value(), sizeof(long_long_result));
+            return (double)long_long_result;
+#else
             return (double) *reinterpret_cast< const long long* >( value() );
+#endif
         default:
             return 0;
         }
