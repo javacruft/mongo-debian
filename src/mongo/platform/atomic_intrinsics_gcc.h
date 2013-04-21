@@ -14,13 +14,18 @@
  */
 
 /**
- * Implementation of the AtomicIntrinsics<T>::* operations for IA-32 and AMD64 systems using a
- * GCC-compatible compiler toolchain.
+ * Implementation of the AtomicIntrinsics<T>::* operations for IA-32, AMD64, and 32-bit ARM
+ * systems using a GCC-compatible compiler toolchain.
  */
 
 #pragma once
 
 #include <boost/utility.hpp>
+
+#if defined(__arm__)
+typedef int (__kuser_cmpxchg_t)(int oldval, int newval, volatile int *ptr);
+#define __kuser_cmpxchg (*(__kuser_cmpxchg_t *)0xffff0fc0)
+#endif
 
 namespace mongo {
 
@@ -37,31 +42,58 @@ namespace mongo {
         static T compareAndSwap(volatile T* dest, T expected, T newValue) {
 
             T result;
+
+#if defined(__i386__) || defined(__x86_64__)
             asm volatile ("lock cmpxchg %[src], %[dest]"
                           : [dest] "+m" (*dest),
                             "=a" (result)
                           : [src] "r" (newValue),
                             "a" (expected)
                           : "memory", "cc");
+#endif
+
+#if defined(__arm__)
+            result = __sync_val_compare_and_swap(dest, expected, newValue);
+#endif
+
             return result;
         }
 
         static T swap(volatile T* dest, T newValue) {
 
             T result = newValue;
+
+#if defined(__i386__) || defined(__x86_64__)
             // No need for "lock" prefix on "xchg".
             asm volatile ("xchg %[r], %[dest]"
                           : [dest] "+m" (*dest),
                             [r] "+r" (result)
                           :
                           : "memory");
+#endif
+
+#if defined(__arm__)
+            __sync_synchronize();
+            result = __sync_lock_test_and_set(dest, newValue);
+#endif
+
             return result;
         }
 
         static T load(volatile const T* value) {
+
+#if defined(__i386__) || defined(__x86_64__)
             asm volatile ("mfence" ::: "memory");
             T result = *value;
             asm volatile ("mfence" ::: "memory");
+#endif
+
+#if defined(__arm__)
+            asm volatile("mcr p15, 0, r0, c7, c10, 5");
+            T result = *value;
+            asm volatile("mcr p15, 0, r0, c7, c10, 5");
+#endif
+
             return result;
         }
 
@@ -70,19 +102,44 @@ namespace mongo {
         }
 
         static void store(volatile T* dest, T newValue) {
+
+#if defined(__i386__) || defined(__x86_64__)
             asm volatile ("mfence" ::: "memory");
             *dest = newValue;
             asm volatile ("mfence" ::: "memory");
+#endif
+
+#if defined(__arm__)
+            asm volatile("mcr p15, 0, r0, c7, c10, 5");
+            *dest = newValue;
+            asm volatile("mcr p15, 0, r0, c7, c10, 5");
+#endif
+
         }
 
         static T fetchAndAdd(volatile T* dest, T increment) {
 
             T result = increment;
+
+#if defined(__i386__) || defined(__x86_64__)
             asm volatile ("lock xadd %[src], %[dest]"
                           : [dest] "+m" (*dest),
                             [src] "+r" (result)
                           :
                           : "memory", "cc");
+#endif
+
+#if defined(__arm__)
+            int old;
+
+            do {
+                old = (int)(*dest);
+            } while(__kuser_cmpxchg((int)old, (int)(old+increment),
+                                    (volatile int *)dest));
+
+            result = old;
+#endif
+
             return result;
         }
 
@@ -105,6 +162,8 @@ namespace mongo {
     public:
         static T compareAndSwap(volatile T* dest, T expected, T newValue) {
             T result = expected;
+
+#if defined(__i386__) || defined(__x86_64__)
             asm volatile ("push %%eax\n"
                           "push %%ebx\n"
                           "push %%ecx\n"
@@ -125,6 +184,12 @@ namespace mongo {
                             "D" (&result),
                             "d" (&newValue)
                           : "memory", "cc");
+#endif
+
+#if defined(__arm__)
+            result = __sync_val_compare_and_swap(dest, expected, newValue);
+#endif
+
             return result;
         }
 
